@@ -1,58 +1,181 @@
-﻿using MQTTnet;
-using MQTTnet.Protocol;
+﻿using Microsoft.Extensions.Logging;
+using MQTTnet;
+using MQTTnet.Diagnostics;
 using MQTTnet.Server;
+
 
 namespace MqttTest
 {
     internal class Program
     {
+        private static ILogger logger;
+
         static async Task Main(string[] args)
         {
-            var mqttFactory = new MqttFactory();
-            var mqttServerOptions = new MqttServerOptionsBuilder()
-                .WithDefaultEndpointPort(1883)
-                .Build();
 
-            var mqttServer = mqttFactory.CreateMqttServer(mqttServerOptions);
+            await Run_Server_With_Logging();
+           
+        }
+
+        public static async Task Force_Disconnecting_Client()
+        {
+            /*
+             * This sample will disconnect a client.
+             *
+             * See _Run_Minimal_Server_ for more information.
+             */
+
+            using (var mqttServer = await StartMqttServer())
+            {
+                // Let the client connect.
+                await Task.Delay(TimeSpan.FromSeconds(5));
+
+                // Now disconnect the client (if connected).
+                var affectedClient = (await mqttServer.GetClientsAsync()).FirstOrDefault(c => c.Id == "MyClient");
+                if (affectedClient != null)
+                {
+                    await affectedClient.DisconnectAsync();
+                }
+            }
+        }
+
+        public static async Task Publish_Message_From_Broker()
+        {
+            /*
+             * This sample will publish a message directly at the broker.
+             *
+             * See _Run_Minimal_Server_ for more information.
+             */
+
+            using (var mqttServer = await StartMqttServer())
+            {
+                // Create a new message using the builder as usual.
+                var message = new MqttApplicationMessageBuilder().WithTopic("HelloWorld").WithPayload("Test").Build();
+
+                // Now inject the new message at the broker.
+                await mqttServer.InjectApplicationMessage(
+                    new InjectedMqttApplicationMessage(message)
+                    {
+                        SenderClientId = "SenderClientId"
+                    });
+            }
+        }
+
+   
+
+        public static async Task Run_Server_With_Logging()
+        {
+            /*
+             * This sample starts a simple MQTT server and prints the logs to the output.
+             *
+             * IMPORTANT! Do not enable logging in live environment. It will decrease performance.
+             *
+             * See sample "Run_Minimal_Server" for more details.
+             */
+
+            var mqttFactory = new MqttFactory(new ConsoleLogger());
+
+            var mqttServerOptions = new MqttServerOptionsBuilder().WithDefaultEndpoint().Build();
+
+
             
-            await mqttServer.StartAsync();
-            Console.WriteLine("MQTT Broker started.");
 
-            var cancellationToken = new CancellationTokenSource();
+            using (var mqttServer = mqttFactory.CreateMqttServer(mqttServerOptions))
+            {
+                
+                await mqttServer.StartAsync();
 
-            Task.Run(() => PublishRandomNumbersPeriodically(mqttServer, cancellationToken.Token));
+                Console.WriteLine("Press Enter to exit.");
+                Console.ReadLine();
 
-            Console.WriteLine("Press any key to exit...");
-            Console.ReadLine();
+                await PublishRandomNumbersPeriodically(mqttServer);
 
-            await cancellationToken.CancelAsync();
-            await mqttServer.StopAsync();
-
-
+                // Stop and dispose the MQTT server if it is no longer needed!
+                await mqttServer.StopAsync();
+            }
         }
 
 
-        static async Task PublishRandomNumbersPeriodically(MqttServer mqttServer, CancellationToken cancellationToken)
+         static async Task PublishRandomNumbersPeriodically(MqttServer mqttServer)
         {
             var random = new Random();
 
-            while (!cancellationToken.IsCancellationRequested)
+            while (true)
             {
-                int randomNumber = random.Next(10);
+                int randomNumber = random.Next(100);
                 string payload = randomNumber.ToString();
                 var message = new MqttApplicationMessageBuilder()
                     .WithTopic("span/number")
                     .WithPayload(payload)
-                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
                     .Build();
 
                 await mqttServer.InjectApplicationMessage(
-                    new InjectedMqttApplicationMessage(message)
-                );
+                    new InjectedMqttApplicationMessage(message));
+                logger.LogInformation($"Published random number: {payload}");
 
-                Console.WriteLine($"Published random number: {payload}");
+                await Task.Delay(TimeSpan.FromSeconds(5)); // Adjust the interval as needed.
+            }
+        }
 
-                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken); 
+
+
+        static async Task<MqttServer> StartMqttServer()
+        {
+            var mqttFactory = new MqttFactory();
+
+            // Due to security reasons the "default" endpoint (which is unencrypted) is not enabled by default!
+            var mqttServerOptions = mqttFactory
+                .CreateServerOptionsBuilder()
+                .WithDefaultEndpoint()
+                .Build();
+            var server = mqttFactory.CreateMqttServer(mqttServerOptions);
+            await server.StartAsync();
+            return server;
+        }
+
+        class ConsoleLogger : IMqttNetLogger
+        {
+            readonly object _consoleSyncRoot = new();
+
+            public bool IsEnabled => true;
+
+            public void Publish(MqttNetLogLevel logLevel, string source, string message, object[]? parameters, Exception? exception)
+            {
+                var foregroundColor = ConsoleColor.White;
+                switch (logLevel)
+                {
+                    case MqttNetLogLevel.Verbose:
+                        foregroundColor = ConsoleColor.White;
+                        break;
+
+                    case MqttNetLogLevel.Info:
+                        foregroundColor = ConsoleColor.Green;
+                        break;
+
+                    case MqttNetLogLevel.Warning:
+                        foregroundColor = ConsoleColor.DarkYellow;
+                        break;
+
+                    case MqttNetLogLevel.Error:
+                        foregroundColor = ConsoleColor.Red;
+                        break;
+                }
+
+                if (parameters?.Length > 0)
+                {
+                    message = string.Format(message, parameters);
+                }
+
+                lock (_consoleSyncRoot)
+                {
+                    Console.ForegroundColor = foregroundColor;
+                    Console.WriteLine(message);
+
+                    if (exception != null)
+                    {
+                        Console.WriteLine(exception);
+                    }
+                }
             }
         }
     }
