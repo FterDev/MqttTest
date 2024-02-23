@@ -20,6 +20,13 @@ namespace MqttTest
 
             var cancellationToken = new CancellationTokenSource();
 
+            Task.Run(() => PublishRandomNumbersPeriodically(mqttServer, cancellationToken.Token));
+
+            Console.WriteLine("Press any key to exit...");
+            Console.ReadLine();
+
+            await cancellationToken.CancelAsync();
+            await mqttServer.StopAsync();
 
 
         }
