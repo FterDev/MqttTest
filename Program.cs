@@ -1,5 +1,5 @@
 ﻿using MQTTnet;
-
+using MQTTnet.Protocol;
 using MQTTnet.Server;
 
 namespace MqttTest
@@ -21,6 +21,32 @@ namespace MqttTest
             var cancellationToken = new CancellationTokenSource();
 
 
+
+        }
+
+
+        static async Task PublishRandomNumbersPeriodically(MqttServer mqttServer, CancellationToken cancellationToken)
+        {
+            var random = new Random();
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                int randomNumber = random.Next(10);
+                string payload = randomNumber.ToString();
+                var message = new MqttApplicationMessageBuilder()
+                    .WithTopic("span/number")
+                    .WithPayload(payload)
+                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                    .Build();
+
+                await mqttServer.InjectApplicationMessage(
+                    new InjectedMqttApplicationMessage(message)
+                );
+
+                Console.WriteLine($"Published random number: {payload}");
+
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken); 
+            }
         }
     }
 }
